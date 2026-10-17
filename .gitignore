@@ -1,0 +1,39 @@
+# Generated macOS application and build output
+*.app/
+*.icns
+/build/
+/dist/
+
+# Python environments and caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Personal configuration, runtime state, and secrets
+.env
+.env.*
+*.local.toml
+terminals.json
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Operating system and editor files
+.DS_Store
+.AppleDouble
+._*
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.log

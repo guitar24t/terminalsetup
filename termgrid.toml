@@ -1,0 +1,26 @@
+# termgrid layout.  Copy to ~/.config/termgrid/termgrid.toml to make it your own.
+#
+# Grids are "COLUMNSxROWS".  Use "off" to leave a monitor without terminals.
+# Run `python3 terminalsetup.py --list-monitors` to see monitor names and usable areas.
+
+# Grid for any monitor not listed under [monitors].
+default = "2x2"
+
+# Pixels between terminals and around the edges of each monitor's usable area.
+gap = 0
+
+# Optional settings for the terminals themselves:
+# profile = "Default"               # a GNOME Terminal or Terminal.app profile name
+# working_directory = "~/repos"
+# command = "htop"                  # string (run through sh -c) or ["argv", "list"]
+
+[monitors]
+# Keys are connector names (as shown by --list-monitors), monitor indexes, or "primary".
+# On macOS the names are display names, e.g. "Built-in Retina Display" = "2x2".
+DP-7 = "3x2"
+DP-12 = "2x2"
+# DP-12 = { columns = 2, rows = 2 }   # table form also works
+
+# macOS
+"Built-in Retina Display" = "2x2"
+"Sidecar Display (AirPlay)" = "off"
