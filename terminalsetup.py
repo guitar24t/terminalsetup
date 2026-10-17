@@ -776,6 +776,9 @@ def main():
                   f"got {desktop.visible_rect(win) or 'nothing'}", file=sys.stderr)
         sys.exit(1)
 
+    if sys.platform == "darwin" and getattr(sys, "frozen", False):
+        desktop.app.activate()
+
 
 if __name__ == "__main__":
     main()

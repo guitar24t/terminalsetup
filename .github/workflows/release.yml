@@ -56,7 +56,7 @@ jobs:
           ditto dist/termgrid.app "$relocated/termgrid.app"
           mkdir -p "$relocated/home" "$relocated/tmp"
           codesign --verify --deep --strict "$relocated/termgrid.app"
-          lipo -verify_arch "$TARGET_ARCH" "$relocated/termgrid.app/Contents/MacOS/termgrid"
+          lipo "$relocated/termgrid.app/Contents/MacOS/termgrid" -verify_arch "$TARGET_ARCH"
           test -f "$relocated/termgrid.app/Contents/Resources/termgrid.toml"
           cd "$relocated"
           env -i HOME="$relocated/home" TMPDIR="$relocated/tmp/" PATH=/usr/bin:/bin \
