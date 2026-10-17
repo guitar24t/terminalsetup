@@ -1,4 +1,4 @@
-name: Release macOS app
+name: Release apps
 
 on:
   push:
@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  build-macos:
     name: Build macOS (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -76,10 +76,69 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  build-windows:
+    name: Build Windows (x86_64)
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      TERMGRID_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0' }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: packaging/requirements.txt
+
+      - name: Install build dependencies
+        run: python -m pip install -r packaging/requirements.txt
+
+      - name: Build standalone executable
+        run: python -m PyInstaller --clean --noconfirm packaging/termgrid.spec
+
+      - name: Verify relocated executable in a clean environment
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $relocated = Join-Path $env:RUNNER_TEMP relocated
+          New-Item -ItemType Directory -Force "$relocated\home", "$relocated\tmp" | Out-Null
+          Copy-Item dist\termgrid.exe $relocated
+          $bytes = [IO.File]::ReadAllBytes("$relocated\termgrid.exe")
+          if ([BitConverter]::ToUInt16($bytes, [BitConverter]::ToInt32($bytes, 0x3c) + 4) -ne 0x8664) {
+            throw "termgrid.exe is not an x86_64 executable"
+          }
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $env:USERPROFILE = $env:LOCALAPPDATA = "$relocated\home"
+          $env:TEMP = $env:TMP = "$relocated\tmp"
+          Remove-Item Env:XDG_CONFIG_HOME -ErrorAction SilentlyContinue
+          Set-Location $relocated
+          .\termgrid.exe --help
+          $plan = .\termgrid.exe --dry-run | Out-String
+          $plan
+          # Without its bundled termgrid.toml, termgrid would plan 1x1 grids.
+          if ($plan -notmatch 'grid 2x2') {
+            throw "termgrid.exe did not use its bundled termgrid.toml"
+          }
+
+      - name: Name executable for release
+        run: Copy-Item dist\termgrid.exe "termgrid-$env:TERMGRID_VERSION-windows-x86_64.exe"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: termgrid-windows-x86_64
+          path: termgrid-*-windows-x86_64.exe
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     name: Publish GitHub release
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -87,7 +146,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: termgrid-macos-*
+          pattern: termgrid-*
           merge-multiple: true
           path: release-assets
 
@@ -98,10 +157,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          sha256sum ./*.zip > SHA256SUMS
+          sha256sum ./*.zip ./*.exe > SHA256SUMS
           options=(--verify-tag --generate-notes --title "termgrid $RELEASE_TAG")
           version_without_metadata=${RELEASE_TAG%%+*}
           if [[ "$version_without_metadata" == *-* ]]; then
             options+=(--prerelease)
           fi
-          gh release create "$RELEASE_TAG" ./*.zip SHA256SUMS "${options[@]}"
+          gh release create "$RELEASE_TAG" ./*.zip ./*.exe SHA256SUMS "${options[@]}"

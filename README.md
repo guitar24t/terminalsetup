@@ -98,16 +98,22 @@ git push origin v1.2.3
 ```
 
 The release workflow builds standalone macOS apps for Apple Silicon (`arm64`)
-and Intel (`x86_64`) and attaches a ZIP for each architecture plus `SHA256SUMS`.
-These apps include Python and PyObjC, so recipients do not need to install them.
-Tags with a suffix such as `v1.2.3-rc.1` publish a prerelease. Version tags must
-use `vMAJOR.MINOR.PATCH`, optionally followed by prerelease or build metadata.
+and Intel (`x86_64`) and a standalone Windows executable (`x86_64`). It attaches
+a ZIP for each macOS architecture, `termgrid-VERSION-windows-x86_64.exe`, and
+`SHA256SUMS`. These builds include Python (and PyObjC on macOS), so recipients
+do not need to install them. Tags with a suffix such as `v1.2.3-rc.1` publish a
+prerelease. Version tags must use `vMAJOR.MINOR.PATCH`, optionally followed by
+prerelease or build metadata.
 
 The apps have ad-hoc signatures and are not notarized with an Apple Developer
 certificate. macOS may require approval in System Settings > Privacy & Security
 when opening a downloaded app. Allow Terminal Automation permission when asked.
 
-Run **Release macOS app** manually from GitHub Actions to test the builds and
+The Windows executable is not code-signed, so SmartScreen may warn when it is
+first opened; choose **More info** > **Run anyway**. Double-click it to arrange
+the terminals, or run it from PowerShell with the same options as the script.
+
+Run **Release apps** manually from GitHub Actions to test the builds and
 download their artifacts without publishing a release. To build a standalone
 app locally on macOS:
 
@@ -118,4 +124,13 @@ python3 make-icon.py build/termgrid.icns
 TERMGRID_VERSION=v1.2.3 python3 -m PyInstaller --clean --noconfirm packaging/termgrid.spec
 ```
 
-The distributable app is written to `dist/termgrid.app`.
+The distributable app is written to `dist/termgrid.app`. On Windows, in
+PowerShell:
+
+```powershell
+py -m pip install -r packaging/requirements.txt
+$env:TERMGRID_VERSION = "v1.2.3"
+py -m PyInstaller --clean --noconfirm packaging/termgrid.spec
+```
+
+The executable is written to `dist\termgrid.exe`.
