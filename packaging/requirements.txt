@@ -1,0 +1,3 @@
+pyinstaller==6.22.3
+pyobjc-framework-Cocoa==12.2.2
+pyobjc-framework-ScriptingBridge==12.2.2

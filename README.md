@@ -65,3 +65,35 @@ The app records the build-time Python interpreter path; keep that interpreter
 available. Personal configuration still takes precedence over the bundled file.
 
 Generated app bundles, local environments, and secret files are ignored by Git.
+
+## Releases
+
+Push a version tag to build and publish a GitHub release:
+
+```sh
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+The release workflow builds standalone macOS apps for Apple Silicon (`arm64`)
+and Intel (`x86_64`) and attaches a ZIP for each architecture plus `SHA256SUMS`.
+These apps include Python and PyObjC, so recipients do not need to install them.
+Tags with a suffix such as `v1.2.3-rc.1` publish a prerelease. Version tags must
+use `vMAJOR.MINOR.PATCH`, optionally followed by prerelease or build metadata.
+
+The apps have ad-hoc signatures and are not notarized with an Apple Developer
+certificate. macOS may require approval in System Settings > Privacy & Security
+when opening a downloaded app. Allow Terminal Automation permission when asked.
+
+Run **Release macOS app** manually from GitHub Actions to test the builds and
+download their artifacts without publishing a release. To build a standalone
+app locally on macOS:
+
+```sh
+python3 -m pip install -r packaging/requirements.txt
+mkdir -p build
+python3 make-icon.py build/termgrid.icns
+TERMGRID_VERSION=v1.2.3 python3 -m PyInstaller --clean --noconfirm packaging/termgrid.spec
+```
+
+The distributable app is written to `dist/termgrid.app`.

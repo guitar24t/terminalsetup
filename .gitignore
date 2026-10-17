@@ -3,6 +3,7 @@
 *.icns
 /build/
 /dist/
+/termgrid-*-macos-*.zip
 
 # Python environments and caches
 .venv/
