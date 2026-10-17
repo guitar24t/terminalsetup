@@ -98,9 +98,9 @@ git push origin v1.2.3
 ```
 
 The release workflow builds standalone macOS apps for Apple Silicon (`arm64`)
-and Intel (`x86_64`) and a standalone Windows executable (`x86_64`). It attaches
-a ZIP for each macOS architecture, `termgrid-VERSION-windows-x86_64.exe`, and
-`SHA256SUMS`. These builds include Python (and PyObjC on macOS), so recipients
+and Intel (`x86_64`) and standalone Windows executables for `x86_64` and
+`arm64`. It attaches a ZIP for each macOS architecture, an executable for each
+Windows architecture (`termgrid-VERSION-windows-ARCH.exe`), and `SHA256SUMS`. These builds include Python (and PyObjC on macOS), so recipients
 do not need to install them. Tags with a suffix such as `v1.2.3-rc.1` publish a
 prerelease. Version tags must use `vMAJOR.MINOR.PATCH`, optionally followed by
 prerelease or build metadata.

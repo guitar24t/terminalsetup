@@ -108,12 +108,23 @@ jobs:
           retention-days: 1
 
   build-windows:
-    name: Build Windows (x86_64)
+    name: Build Windows (${{ matrix.arch }})
     needs: windows-icon
-    runs-on: windows-2025
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2025
+            arch: x86_64
+            python-arch: x64
+          - runner: windows-11-arm
+            arch: arm64
+            python-arch: arm64
     env:
       TERMGRID_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.0.0' }}
+      TARGET_ARCH: ${{ matrix.arch }}
     defaults:
       run:
         shell: pwsh
@@ -125,6 +136,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
+          # PyInstaller builds for the Python running it, so arm64 needs a native arm64 Python.
+          architecture: ${{ matrix.python-arch }}
           cache: pip
           cache-dependency-path: packaging/requirements.txt
 
@@ -151,8 +164,9 @@ jobs:
           New-Item -ItemType Directory -Force "$relocated\home", "$relocated\tmp" | Out-Null
           Copy-Item dist\termgrid.exe $relocated
           $bytes = [IO.File]::ReadAllBytes("$relocated\termgrid.exe")
-          if ([BitConverter]::ToUInt16($bytes, [BitConverter]::ToInt32($bytes, 0x3c) + 4) -ne 0x8664) {
-            throw "termgrid.exe is not an x86_64 executable"
+          $machine = @{ x86_64 = 0x8664; arm64 = 0xAA64 }[$env:TARGET_ARCH]
+          if ([BitConverter]::ToUInt16($bytes, [BitConverter]::ToInt32($bytes, 0x3c) + 4) -ne $machine) {
+            throw "termgrid.exe is not an $env:TARGET_ARCH executable"
           }
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
           $env:USERPROFILE = $env:LOCALAPPDATA = "$relocated\home"
@@ -168,12 +182,12 @@ jobs:
           }
 
       - name: Name executable for release
-        run: Copy-Item dist\termgrid.exe "termgrid-$env:TERMGRID_VERSION-windows-x86_64.exe"
+        run: Copy-Item dist\termgrid.exe "termgrid-$env:TERMGRID_VERSION-windows-$env:TARGET_ARCH.exe"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: termgrid-windows-x86_64
-          path: termgrid-*-windows-x86_64.exe
+          name: termgrid-windows-${{ matrix.arch }}
+          path: termgrid-*-windows-${{ matrix.arch }}.exe
           if-no-files-found: error
           retention-days: 7
 
