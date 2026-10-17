@@ -22,6 +22,8 @@ if sys.platform == "win32":
         FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo, VarStruct, VSVersionInfo)
 
     numbers = tuple(int(n) for n in version[1].split(".")) + (0,)
+    # Drawn by make-icon.py, which needs macOS; without it the exe gets Windows' default icon.
+    icon = root / "build" / "termgrid.ico"
     # A single termgrid.exe.  It is a console program so that its options and
     # messages work from PowerShell; a double-click gives it a console of its own.
     executable = EXE(
@@ -32,7 +34,7 @@ if sys.platform == "win32":
         [],
         name="termgrid",
         console=True,
-        icon="NONE",
+        icon=str(icon) if icon.exists() else "NONE",
         version=VSVersionInfo(
             ffi=FixedFileInfo(filevers=numbers, prodvers=numbers),
             kids=[

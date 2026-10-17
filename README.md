@@ -133,4 +133,8 @@ $env:TERMGRID_VERSION = "v1.2.3"
 py -m PyInstaller --clean --noconfirm packaging/termgrid.spec
 ```
 
-The executable is written to `dist\termgrid.exe`.
+The executable is written to `dist\termgrid.exe`. Its icon is drawn from
+Terminal's on macOS, so the release workflow makes it on a macOS runner. To
+include it in a local build, run `python3 make-icon.py build/termgrid.ico` on a
+Mac and copy the file to `build\termgrid.ico` first; otherwise the executable
+gets Windows' default icon.

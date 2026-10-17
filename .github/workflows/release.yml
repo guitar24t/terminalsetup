@@ -76,8 +76,40 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  windows-icon:
+    name: Draw Windows icon
+    # make-icon.py draws from Terminal's own icon, which only macOS has.
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: packaging/requirements.txt
+
+      - name: Install drawing dependencies
+        run: python -m pip install -r packaging/requirements.txt
+
+      - name: Draw icon
+        run: |
+          mkdir -p build
+          python make-icon.py build/termgrid.ico
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-icon
+          path: build/termgrid.ico
+          if-no-files-found: error
+          retention-days: 1
+
   build-windows:
     name: Build Windows (x86_64)
+    needs: windows-icon
     runs-on: windows-2025
     timeout-minutes: 30
     env:
@@ -96,11 +128,21 @@ jobs:
           cache: pip
           cache-dependency-path: packaging/requirements.txt
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: windows-icon
+          path: build
+
       - name: Install build dependencies
         run: python -m pip install -r packaging/requirements.txt
 
       - name: Build standalone executable
-        run: python -m PyInstaller --clean --noconfirm packaging/termgrid.spec
+        run: |
+          # The spec builds without an icon when it is missing; a release must have it.
+          if (-not (Test-Path build\termgrid.ico)) {
+            throw "build\termgrid.ico is missing"
+          }
+          python -m PyInstaller --clean --noconfirm packaging/termgrid.spec
 
       - name: Verify relocated executable in a clean environment
         run: |

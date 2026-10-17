@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Draw termgrid's app icon: Terminal's own icon split into a 2x2 grid of terminals.
 
-Usage: make-icon.py OUT.icns      (or OUT.png for a 1024-pixel preview)
+Usage: make-icon.py OUT.icns      (or OUT.ico for Windows, or OUT.png for a 1024-pixel preview)
 
 The body, rim and shadow are Terminal's icon as macOS draws it, so the result
 keeps Terminal's look.  Its ">_" prompt is lifted off and redrawn smaller in
-each pane.
+each pane.  Drawing it needs macOS, so the Windows build gets its .ico from a
+macOS runner.
 """
 
 import os
+import struct
 import subprocess
 import sys
 import tempfile
@@ -28,6 +30,8 @@ RIM = 14                          # the body's lit edge, which the dividers stop
 PROMPT_SCALE = 0.45
 DIVIDER = 10                      # width of the lines between panes
 DIVIDER_COLOR = (0.30, 0.30, 0.30)
+
+ICO_SIZES = (16, 24, 32, 48, 64, 128, 256)  # the sizes Windows looks for in an .ico
 
 
 def rect(x, y, w, h, scale=1):
@@ -123,13 +127,38 @@ def save_png(rep, path):
         sys.exit(f"make-icon: cannot write {path}")
 
 
+def write_ico(pngs, path):
+    """Pack PNG images, given as {size: PNG file contents}, into a Windows .ico file."""
+    images = sorted(pngs.items())
+    header = struct.pack("<HHH", 0, 1, len(images))  # reserved, type 1 = icon, image count
+    offset = len(header) + 16 * len(images)
+    entries = []
+    for size, data in images:
+        # Width and height are single bytes, where 0 stands for 256.
+        side = 0 if size == 256 else size
+        entries.append(struct.pack("<BBBBHHII", side, side, 0, 0, 1, 32, len(data), offset))
+        offset += len(data)
+    with open(path, "wb") as f:
+        f.write(header + b"".join(entries) + b"".join(data for _, data in images))
+
+
 def main():
-    if len(sys.argv) != 2 or not sys.argv[1].endswith((".icns", ".png")):
-        sys.exit("usage: make-icon.py OUT.icns|OUT.png")
+    if len(sys.argv) != 2 or not sys.argv[1].endswith((".icns", ".ico", ".png")):
+        sys.exit("usage: make-icon.py OUT.icns|OUT.ico|OUT.png")
     out = sys.argv[1]
     prompt = lift_prompt(terminal_icon(1024))
     if out.endswith(".png"):
         save_png(render(1024, prompt), out)
+        return
+    if out.endswith(".ico"):
+        with tempfile.TemporaryDirectory() as work:
+            pngs = {}
+            for size in ICO_SIZES:
+                png = os.path.join(work, f"icon_{size}.png")
+                save_png(render(size, prompt), png)
+                with open(png, "rb") as f:
+                    pngs[size] = f.read()
+            write_ico(pngs, out)
         return
     with tempfile.TemporaryDirectory() as work:
         iconset = os.path.join(work, "termgrid.iconset")
