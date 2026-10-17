@@ -1,9 +1,9 @@
 # terminalsetup (termgrid)
 
 Arrange terminal windows in a configurable grid on each monitor, using the
-desktop area available around the menu bar, panels, and dock. Supports
-Terminal.app on macOS and GNOME Terminal on Linux, including GNOME Wayland
-through Xwayland.
+desktop area available around the menu bar, panels, dock, and taskbar. Supports
+Terminal.app on macOS, GNOME Terminal on Linux (including GNOME Wayland through
+Xwayland), and PowerShell console windows on Windows.
 
 Requires Python 3.11 or later.
 
@@ -22,6 +22,13 @@ Allow control of Terminal when macOS requests Automation permission.
 On Linux, install GNOME Terminal, `xrandr`, `gdbus`, and libX11 using your
 distribution's packages. Wayland sessions also require Xwayland.
 
+On Windows 10 or 11, install Python (for example with
+`winget install Python.Python.3.13`); no other packages are needed. The
+terminals run PowerShell 7 (`pwsh`) when it is installed and Windows PowerShell
+otherwise. They always open as classic console windows, even when Windows
+Terminal is the default terminal app, because Windows Terminal windows cannot
+be told apart and arranged individually.
+
 ## Usage
 
 ```sh
@@ -30,6 +37,9 @@ python3 terminalsetup.py --list-monitors
 python3 terminalsetup.py --dry-run
 python3 terminalsetup.py
 ```
+
+On Windows, run the same commands from PowerShell with `py` in place of
+`python3`.
 
 Running the command again reuses and arranges its existing windows, opens missing
 ones, and closes those that no longer fit. Override a monitor's layout with
@@ -46,10 +56,22 @@ mkdir -p ~/.config/termgrid
 cp termgrid.toml ~/.config/termgrid/termgrid.toml
 ```
 
+On Windows, in PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force ~\.config\termgrid
+Copy-Item termgrid.toml ~\.config\termgrid\termgrid.toml
+```
+
 Edit that copy using the monitor names reported by `--list-monitors`. Grids use
 `COLUMNSxROWS`; `off` leaves a monitor alone. You can also configure a terminal
 profile, working directory, and startup command. Use `--config PATH` to select
 another file. The default lookup respects `XDG_CONFIG_HOME` when set.
+
+On Windows, monitors are named `DISPLAY1`, `DISPLAY2`, and so on, and `profile`
+is not used. A string `command` runs through PowerShell's `-Command` instead of
+`sh -c`; a list such as `["cmd.exe"]` runs that program instead of PowerShell.
+A `cd` in your PowerShell profile overrides `working_directory`.
 
 ## macOS app
 

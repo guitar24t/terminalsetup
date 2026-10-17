@@ -1,4 +1,5 @@
-# termgrid layout.  Copy to ~/.config/termgrid/termgrid.toml to make it your own.
+# termgrid layout.  Copy to ~/.config/termgrid/termgrid.toml to make it your own
+# (on Windows, %USERPROFILE%\.config\termgrid\termgrid.toml).
 #
 # Grids are "COLUMNSxROWS".  Use "off" to leave a monitor without terminals.
 # Run `python3 terminalsetup.py --list-monitors` to see monitor names and usable areas.
@@ -10,9 +11,9 @@ default = "2x2"
 gap = 0
 
 # Optional settings for the terminals themselves:
-# profile = "Default"               # a GNOME Terminal or Terminal.app profile name
+# profile = "Default"               # a GNOME Terminal or Terminal.app profile name (not used on Windows)
 # working_directory = "~/repos"
-# command = "htop"                  # string (run through sh -c) or ["argv", "list"]
+# command = "htop"                  # string (run through sh -c, or PowerShell on Windows) or ["argv", "list"]
 
 [monitors]
 # Keys are connector names (as shown by --list-monitors), monitor indexes, or "primary".
@@ -24,3 +25,6 @@ DP-12 = "2x2"
 # macOS
 "Built-in Retina Display" = "2x2"
 "Sidecar Display (AirPlay)" = "off"
+
+# Windows names its monitors DISPLAY1, DISPLAY2, ...
+# DISPLAY1 = "2x2"

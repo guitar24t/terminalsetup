@@ -2,8 +2,8 @@
 """Fill each monitor's work area with a grid of terminal windows.
 
 Each monitor can have its own number of columns and rows (see termgrid.toml).
-The terminals tile the area left free by the top bar and dock exactly, with no
-overlap and no gaps.
+The terminals tile the area left free by the top bar, dock and taskbar exactly,
+with no overlap and no gaps.
 
 On Linux the terminals are GNOME Terminal windows.  On a GNOME Wayland session,
 native Wayland windows cannot be positioned by another program, so the
@@ -15,6 +15,11 @@ On macOS the terminals are Terminal.app windows, driven over Apple Events with
 PyObjC (pip install pyobjc-framework-Cocoa pyobjc-framework-ScriptingBridge).
 The first run asks for permission to control Terminal.  build-app.sh wraps
 this script in a double-clickable termgrid.app.
+
+On Windows the terminals are PowerShell console windows (PowerShell 7 when it
+is installed, otherwise Windows PowerShell), moved with the Win32 API through
+ctypes.  They are started through conhost.exe, because Windows 11 would
+otherwise hand them to Windows Terminal, whose windows cannot be told apart.
 """
 
 import argparse
@@ -226,6 +231,155 @@ class X11:
             if role.startswith(ROLE_PREFIX):
                 windows[role] = win
         return windows
+
+
+# --------------------------------------------------------------------------
+# Minimal Win32 binding (ctypes), enough to find, inspect and move windows.
+# Fixed-width types stand in for ctypes.wintypes so this imports anywhere.
+# --------------------------------------------------------------------------
+
+class RECT(ctypes.Structure):
+    _fields_ = [("left", ctypes.c_int32), ("top", ctypes.c_int32),
+                ("right", ctypes.c_int32), ("bottom", ctypes.c_int32)]
+
+    def rect(self):
+        return Rect(self.left, self.top, self.right - self.left, self.bottom - self.top)
+
+
+class MONITORINFOEXW(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_uint32), ("rcMonitor", RECT), ("rcWork", RECT),
+                ("dwFlags", ctypes.c_uint32), ("szDevice", ctypes.c_wchar * 32)]
+
+
+class PROCESSENTRY32W(ctypes.Structure):
+    _fields_ = [("dwSize", ctypes.c_uint32), ("cntUsage", ctypes.c_uint32),
+                ("th32ProcessID", ctypes.c_uint32), ("th32DefaultHeapID", ctypes.c_size_t),
+                ("th32ModuleID", ctypes.c_uint32), ("cntThreads", ctypes.c_uint32),
+                ("th32ParentProcessID", ctypes.c_uint32), ("pcPriClassBase", ctypes.c_int32),
+                ("dwFlags", ctypes.c_uint32), ("szExeFile", ctypes.c_wchar * 260)]
+
+
+DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+MONITORINFOF_PRIMARY = 1
+DWMWA_EXTENDED_FRAME_BOUNDS = 9
+SWP_NOZORDER = 0x0004
+SWP_NOACTIVATE = 0x0010
+SW_RESTORE = 9
+WM_CLOSE = 0x0010
+TH32CS_SNAPPROCESS = 0x2
+INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+
+class Win32:
+    def __init__(self):
+        user32 = self.user32 = ctypes.WinDLL("user32")
+        kernel32 = self.kernel32 = ctypes.WinDLL("kernel32")
+        self.dwmapi = ctypes.WinDLL("dwmapi")
+        self._monitor_proc = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+                                                ctypes.POINTER(RECT), ctypes.c_ssize_t)
+        self._window_proc = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_ssize_t)
+        user32.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+        user32.EnumDisplayMonitors.argtypes = [ctypes.c_void_p, ctypes.c_void_p, self._monitor_proc,
+                                               ctypes.c_ssize_t]
+        user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.POINTER(MONITORINFOEXW)]
+        user32.EnumWindows.argtypes = [self._window_proc, ctypes.c_ssize_t]
+        user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+        user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+        user32.GetWindowThreadProcessId.restype = ctypes.c_uint32
+        for name in ("IsWindow", "IsIconic", "IsZoomed"):
+            getattr(user32, name).argtypes = [ctypes.c_void_p]
+        user32.ShowWindow.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(RECT)]
+        user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                                        ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+        user32.PostMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+        self.dwmapi.DwmGetWindowAttribute.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p,
+                                                      ctypes.c_uint32]
+        kernel32.CreateToolhelp32Snapshot.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+        kernel32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+        kernel32.Process32FirstW.argtypes = [ctypes.c_void_p, ctypes.POINTER(PROCESSENTRY32W)]
+        kernel32.Process32NextW.argtypes = [ctypes.c_void_p, ctypes.POINTER(PROCESSENTRY32W)]
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+
+        # Work in physical pixels everywhere.  Otherwise Windows scales the
+        # coordinates of monitors whose display scaling is not 100%.
+        user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+
+    def monitors(self):
+        """MONITORINFOEXW for every monitor, in the order Windows lists them."""
+        found = []
+
+        def visit(monitor, dc, rect, data):
+            info = MONITORINFOEXW(cbSize=ctypes.sizeof(MONITORINFOEXW))
+            if self.user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                found.append(info)
+            return True
+
+        self.user32.EnumDisplayMonitors(None, None, self._monitor_proc(visit), 0)
+        return found
+
+    def class_name(self, win):
+        buf = ctypes.create_unicode_buffer(256)
+        return buf.value if self.user32.GetClassNameW(win, buf, len(buf)) else ""
+
+    def owner(self, win):
+        pid = ctypes.c_uint32()
+        self.user32.GetWindowThreadProcessId(win, ctypes.byref(pid))
+        return pid.value
+
+    def windows(self, class_name):
+        """Map window handle -> owning process id for every top-level window of a class."""
+        found = {}
+
+        def visit(win, data):
+            if self.class_name(win) == class_name:
+                found[win] = self.owner(win)
+            return True
+
+        self.user32.EnumWindows(self._window_proc(visit), 0)
+        return found
+
+    def parent_processes(self):
+        """Map process id -> parent process id for every running process."""
+        snapshot = self.kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if snapshot == INVALID_HANDLE_VALUE:
+            return {}
+        parents = {}
+        entry = PROCESSENTRY32W(dwSize=ctypes.sizeof(PROCESSENTRY32W))
+        more = self.kernel32.Process32FirstW(snapshot, ctypes.byref(entry))
+        while more:
+            parents[entry.th32ProcessID] = entry.th32ParentProcessID
+            more = self.kernel32.Process32NextW(snapshot, ctypes.byref(entry))
+        self.kernel32.CloseHandle(snapshot)
+        return parents
+
+    def is_window(self, win):
+        return bool(self.user32.IsWindow(win))
+
+    def window_rect(self, win):
+        """The window's (x, y, width, height), including its invisible resize borders, or None."""
+        rect = RECT()
+        return rect.rect() if self.user32.GetWindowRect(win, ctypes.byref(rect)) else None
+
+    def frame(self, win):
+        """The part of the window that is drawn, without the invisible resize borders, or None."""
+        rect = RECT()
+        if self.dwmapi.DwmGetWindowAttribute(win, DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(rect),
+                                             ctypes.sizeof(rect)) != 0:
+            return None
+        return rect.rect()
+
+    def restore(self, win):
+        """Minimized windows ignore moves, and maximized ones snap back to the whole work area."""
+        if self.user32.IsIconic(win) or self.user32.IsZoomed(win):
+            self.user32.ShowWindow(win, SW_RESTORE)
+
+    def move_resize(self, win, x, y, w, h):
+        self.user32.SetWindowPos(win, None, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE)
+
+    def close_window(self, win):
+        """Ask a window to close, as if its close button was clicked."""
+        self.user32.PostMessageW(win, WM_CLOSE, 0, 0)
 
 
 # --------------------------------------------------------------------------
@@ -668,6 +822,121 @@ class MacTerminal:
         return Rect(round(x), round(y), round(w), round(h))
 
 
+SYSTEM32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+CONHOST = os.path.join(SYSTEM32, "conhost.exe")
+WINDOWS_POWERSHELL = os.path.join(SYSTEM32, "WindowsPowerShell", "v1.0", "powershell.exe")
+CONSOLE_CLASS = "ConsoleWindowClass"
+WINDOWS_STATE_PATH = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+                                  "termgrid", "terminals.json")
+
+
+def console_command(config):
+    """Command line run in each console window: PowerShell, or the configured command."""
+    command = config.get("command")
+    if isinstance(command, list):
+        return command
+    shell = shutil.which("pwsh") or WINDOWS_POWERSHELL
+    # Like `gnome-terminal -- sh -c COMMAND`, the command takes the shell's place.
+    return [shell, "-Command", command] if command else [shell]
+
+
+class PowerShellConsole:
+    """PowerShell in console (conhost) windows on Windows.
+
+    Windows 11 hands new consoles to the default terminal app, which is usually
+    Windows Terminal, so each window is opened by starting conhost.exe directly.
+    A console window reports the shell inside it as its owner, rather than
+    conhost, so the shell's parent process ties a window back to its launch.
+    The window handle and shell process id of each terminal termgrid opens are
+    remembered in WINDOWS_STATE_PATH.
+    """
+
+    def __init__(self):
+        self.win32 = Win32()
+        try:
+            with open(WINDOWS_STATE_PATH) as f:
+                self.state = json.load(f)  # role -> {"window": handle, "pid": shell process id}
+        except (OSError, ValueError):
+            self.state = {}
+
+    def _save(self):
+        os.makedirs(os.path.dirname(WINDOWS_STATE_PATH), exist_ok=True)
+        with open(WINDOWS_STATE_PATH, "w") as f:
+            json.dump(self.state, f, indent=2)
+
+    def monitors(self):
+        monitors = []
+        for index, info in enumerate(self.win32.monitors()):
+            name = info.szDevice.removeprefix("\\\\.\\")  # \\.\DISPLAY1 -> DISPLAY1
+            mon = Monitor(index, name, bool(info.dwFlags & MONITORINFOF_PRIMARY), info.rcMonitor.rect())
+            mon.workarea = info.rcWork.rect()  # without the taskbar
+            monitors.append(mon)
+        return monitors
+
+    def windows(self):
+        """Map role -> window handle for every terminal termgrid opened that is still open."""
+        consoles = self.win32.windows(CONSOLE_CLASS)
+        state = {role: entry for role, entry in self.state.items()
+                 if consoles.get(entry["window"]) == entry["pid"]}
+        if state != self.state:
+            self.state = state
+            self._save()
+        return {role: entry["window"] for role, entry in self.state.items()}
+
+    def close(self, windows, timeout=5):
+        for win in windows:
+            self.win32.close_window(win)
+        deadline = time.monotonic() + timeout
+        while any(self.win32.is_window(win) for win in windows) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.windows()
+
+    def launch(self, roles, config, timeout=15):
+        command = console_command(config)
+        cwd = os.path.expanduser(config["working_directory"]) if config.get("working_directory") else None
+        hosts = {}  # conhost process id -> (process, role)
+        for role in roles:
+            try:
+                proc = subprocess.Popen([CONHOST, *command], cwd=cwd)
+            except OSError as err:
+                sys.exit(f"termgrid: cannot open a console window: {err}")
+            hosts[proc.pid] = proc, role
+        deadline = time.monotonic() + timeout
+        while True:
+            parents = self.win32.parent_processes()
+            for win, pid in self.win32.windows(CONSOLE_CLASS).items():
+                proc, role = hosts.pop(parents.get(pid), (None, None))
+                if role is not None:
+                    self.state[role] = {"window": win, "pid": pid}
+            # A conhost that has exited will never show a window.
+            hosts = {pid: host for pid, host in hosts.items() if host[0].poll() is None}
+            if not hosts or time.monotonic() > deadline:
+                break
+            time.sleep(0.05)
+        self._save()
+        return self.windows()
+
+    def check_minimum_sizes(self, placements):
+        pass  # conhost does not publish its minimum size; place_windows reports any shortfall.
+
+    def move(self, win, cell):
+        self.win32.restore(win)
+        outer, drawn = self.win32.window_rect(win), self.win32.frame(win)
+        if outer is None or drawn is None:
+            return
+        # The resize borders are invisible but still part of the window, so grow
+        # the window by them to make its drawn part cover the cell.
+        left, top = drawn.x - outer.x, drawn.y - outer.y
+        right, bottom = outer.x + outer.w - drawn.x - drawn.w, outer.y + outer.h - drawn.y - drawn.h
+        self.win32.move_resize(win, cell.x - left, cell.y - top, cell.w + left + right, cell.h + top + bottom)
+
+    def sync(self):
+        pass  # SetWindowPos returns once the window has handled the move.
+
+    def visible_rect(self, win):
+        return self.win32.frame(win) if self.win32.is_window(win) else None
+
+
 # --------------------------------------------------------------------------
 # Command line.
 # --------------------------------------------------------------------------
@@ -716,7 +985,12 @@ def parse_args():
 
 def main():
     args = parse_args()
-    desktop = MacTerminal() if sys.platform == "darwin" else GnomeTerminal()
+    if sys.platform == "darwin":
+        desktop = MacTerminal()
+    elif sys.platform == "win32":
+        desktop = PowerShellConsole()
+    else:
+        desktop = GnomeTerminal()
 
     if args.close:
         desktop.close(list(desktop.windows().values()))
